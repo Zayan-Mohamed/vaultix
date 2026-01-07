@@ -212,8 +212,7 @@ func (v *Vault) ExtractFile(password, fileName, destPath string) (string, error)
 	}
 
 	// Find the file with fuzzy matching
-	var fileMeta *storage.FileMetadata
-	fileMeta = findFileByName(meta.Files, fileName)
+	fileMeta := findFileByName(meta.Files, fileName)
 
 	if fileMeta == nil {
 		return "", ErrFileNotFound
