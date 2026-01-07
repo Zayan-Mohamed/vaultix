@@ -1,10 +1,12 @@
 # vaultix
 
 <p align="center">
+  <img src="https://img.shields.io/github/v/release/Zayan-Mohamed/vaultix?style=for-the-badge" alt="Release"/>
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version"/>
   <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="License"/>
   <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=for-the-badge" alt="Platform"/>
   <img src="https://img.shields.io/badge/Encryption-AES--256--GCM-red?style=for-the-badge&logo=gnuprivacyguard&logoColor=white" alt="Encryption"/>
+  <img src="https://img.shields.io/github/actions/workflow/status/Zayan-Mohamed/vaultix/build.yml?style=for-the-badge&label=Build" alt="Build Status"/>
 </p>
 
 <p align="center">
@@ -15,7 +17,7 @@
   <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#quick-start">Quick Start</a> •
-  <a href="#documentation">Documentation</a> •
+  <a href="https://zayan-mohamed.github.io/vaultix">Documentation</a> •
   <a href="#security">Security</a> •
   <a href="#contributing">Contributing</a>
 </p>
@@ -35,7 +37,7 @@ vaultix is a secure, lightweight CLI tool that encrypts files in place using mil
 - 🔐 **No Password Storage**: Passwords exist only in memory
 - 📦 **Portable**: Encrypted vaults work across all platforms
 
-## Features
+## ✨ Features
 
 ✅ **Automatic Encryption** - Initialize a vault and all files are encrypted instantly  
 ✅ **Fuzzy File Matching** - No need to type exact filenames  
@@ -44,17 +46,6 @@ vaultix is a secure, lightweight CLI tool that encrypts files in place using mil
 ✅ **Secure Deletion** - Original files are overwritten before deletion  
 ✅ **Hidden Metadata** - Even filenames are encrypted  
 ✅ **No Background Process** - Runs only when you invoke it
-
-## What vaultix is NOT
-
-vaultix is **not**:
-
-- A password manager or password storage system
-- A cloud sync tool
-- A keychain replacement
-- An OS-level security boundary
-- A DRM or copy protection system
-- A background daemon or service
 
 ## Security Model
 
@@ -93,39 +84,33 @@ vaultix does **not** protect against:
 
 ## 📦 Installation
 
-### Prerequisites
+### Download Pre-built Binary (Recommended)
 
-- Go 1.21 or higher (for building from source)
-- Git
+Download the latest release for your platform:
 
-### Quick Install (Recommended)
-
-**Linux and macOS:**
-
+**Linux:**
 ```bash
-git clone https://github.com/Zayan-Mohamed/vaultix.git
-cd vaultix
-./install.sh
+curl -LO https://github.com/Zayan-Mohamed/vaultix/releases/latest/download/vaultix-linux-amd64
+chmod +x vaultix-linux-amd64
+sudo mv vaultix-linux-amd64 /usr/local/bin/vaultix
 ```
 
-**Windows (PowerShell):**
+**macOS:**
+```bash
+curl -LO https://github.com/Zayan-Mohamed/vaultix/releases/latest/download/vaultix-darwin-amd64
+chmod +x vaultix-darwin-amd64
+sudo mv vaultix-darwin-amd64 /usr/local/bin/vaultix
+```
 
+**Windows (PowerShell as Admin):**
 ```powershell
-git clone https://github.com/Zayan-Mohamed/vaultix.git
-cd vaultix
-.\install.ps1
+Invoke-WebRequest -Uri "https://github.com/Zayan-Mohamed/vaultix/releases/latest/download/vaultix-windows-amd64.exe" -OutFile "vaultix.exe"
+Move-Item vaultix.exe C:\Windows\System32\
 ```
 
-The installation script will:
+### Build from Source
 
-- Build the binary
-- Install it to the appropriate location
-- Add it to your PATH (Windows)
-- Verify the installation
-
-### Manual Build
-
-If you prefer to build manually:
+Requires Go 1.21 or higher:
 
 ```bash
 git clone https://github.com/Zayan-Mohamed/vaultix.git
@@ -137,18 +122,12 @@ Then move the binary to your PATH:
 
 **Linux/macOS:**
 
-```bash
-sudo mv vaultix /usr/local/bin/
+sudo mv vaultix /usr/local/bin/  # Linux/macOS
 ```
 
-**Windows:**
-🚀 Quick Start
+---
 
-### Basic Workflow
-
-```bash
-# Navigate to directory with sensitive files
-cd ~/my_secrets
+## cd ~/my_secrets
 
 # Initialize vault (encrypts all files automatically)
 vaultix init
@@ -192,11 +171,17 @@ vaultix extract
 
 | `🏗️ Architecture
 
-### Project Structure
+### Pro [path]`    | List encrypted files                   | `vaultix list`           |
+| `extract [file]` | Extract file(s), keeps in vault        | `vaultix extract`        |
+| `drop <file>`    | Extract and remove from vault          | `vaultix drop secret`    |
+| `remove <file>`  | Remove file from vault (no extract)    | `vaultix remove old.txt` |
+| `clear [path]`   | Remove all files from vault            | `vaultix clear`          |
 
-```
-vaultix/
-├── internal/
+> 💡 **Pro Tip**: Most commands default to current directory, so you rarely need to specify paths!
+
+---
+
+## 🔒 Security
 │   ├── crypto/       # Cryptographic operations (Argon2id, AES-GCM)
 │   ├── storage/      # File system operations
 │   ├── vault/        # Business logic layer
@@ -333,67 +318,87 @@ This software is provided as-is, without any warranties. While vaultix uses well
 <p align="center">Made with ❤️ for security-conscious developers</p>
 ```
 
-### Running Tests
+---
 
-```bash
-go test ./...
-```
+## 🔒 Security
 
-### Project Dependencies
+### Cryptography
 
-- `golang.org/x/crypto` - Argon2id implementation
-- `golang.org/x/term` - Password input handling
+- **Key Derivation**: Argon2id with 64MB memory, 3 iterations, 4 threads
+- **Encryption**: AES-256-GCM (authenticated encryption)
+- **Randomness**: Go's `crypto/rand` package
 
-### Code Organization
+### Threat Model
 
-- **`internal/crypto/`** - All cryptographic operations (key derivation, encryption/decryption)
-- **`internal/storage/`** - File system abstractions (vault structure, object storage)
-- **`internal/vault/`** - High-level vault operations (init, add, extract, remove)
-- **`internal/cli/`** - Command-line interface and user interaction
+**Protects Against:**
+- ✅ Unauthorized access to files at rest
+- ✅ Accidental exposure of file contents
+- ✅ Cloud storage providers reading your data
+
+**Does NOT Protect Against:**
+- ❌ Weak passwords (use 16+ characters!)
+- ❌ Malware or keyloggers on your system
+- ❌ Physical access while computer is unlocked
+- ❌ Coercion or legal compulsion
+
+### Important Limitations
+
+- **Password-only security**: Your vault is only as secure as your password
+- **No password recovery**: Forget your password = lose your data permanently
+- **No automatic backups**: You are responsible for backing up your vaults
+
+---
+
+## 📖 Documentation
+
+Full documentation is available at: **[https://zayan-mohamed.github.io/vaultix](https://zayan-mohamed.github.io/vaultix)**
+
+- 📘 [Installation Guide](https://zayan-mohamed.github.io/vaultix/installation/)
+- 🚀 [Quick Start](https://zayan-mohamed.github.io/vaultix/quickstart/)
+- 📚 [Command Reference](https://zayan-mohamed.github.io/vaultix/commands/)
+- 💡 [Examples](https://zayan-mohamed.github.io/vaultix/examples/)
+- 🔐 [Security Model](https://zayan-mohamed.github.io/vaultix/security/)
+- 🏗️ [Architecture](https://zayan-mohamed.github.io/vaultix/architecture/)
+
+---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please ensure:
+Contributions are welcome! Please read our [Contributing Guide](https://zayan-mohamed.github.io/vaultix/contributing/) first.
 
-- ✅ Security-critical code is clearly documented
-- ✅ No new cryptographic primitives without strong justification
-- ✅ All changes maintain cross-platform compatibility
-- ✅ Code follows the project's simplicity-first philosophy
-- ✅ Add tests for new features
-- ✅ Update documentation
+### Quick Start for Contributors
 
-### Contribution Guidelines
+```bash
+# Fork and clone
+git clone https://github.com/YOUR_USERNAME/vaultix.git
+cd vaultix
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+# Build
+go build -o vaultix
+
+# Run tests
+go test ./...
+
+# Run linters
+go vet ./...
+staticcheck ./...
+```
+
+---
 
 ## 📄 License
 
-MIT License - See [LICENSE](LICENSE) file for details
+MIT License - See [LICENSE](LICENSE) file for details.
 
-- Key rotation
-- Configurable Argon2 parameters
-- Secure file deletion
-- Vault verification/repair
+---
 
-## License
+## ⚠️ Disclaimer
 
-MIT License - See LICENSE file for details
+This software is provided as-is, without any warranties. While vaultix uses well-established cryptographic libraries, it has not undergone formal security auditing. Use at your own risk.
 
-## Contributing
+**Remember**: Your vault's security depends entirely on your password strength and operational security practices.
 
-Contributions are welcome. Please ensure:
+---
 
-- Security-critical code is clearly documented
-- No new cryptographic primitives without strong justification
-- All changes maintain cross-platform compatibility
-- Code follows the project's simplicity-first philosophy
-
-## Disclaimer
-
-This software is provided as-is, without any warranties. While vaultix uses well-established cryptographic libraries and follows security best practices, it has not undergone formal security auditing. Use at your own risk.
-
-**Remember**: The security of your vault depends entirely on your password strength and operational security practices.
+<p align="center">Made with ❤️ for security-conscious developers</p>
+<p align="center">⭐ Star this repo if you find it useful!</p>
