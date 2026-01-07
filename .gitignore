@@ -1,0 +1,17 @@
+# Build binary
+vaultix
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test vaults
+test_vault/
+*.vault/

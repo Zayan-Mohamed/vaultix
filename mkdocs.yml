@@ -1,0 +1,97 @@
+site_name: Vaultix Documentation
+site_description: A cross-platform command-line tool for managing password-protected encrypted folders
+site_author: Zayan Mohamed
+site_url: https://zayan-mohamed.github.io/vaultix
+repo_name: Zayan-Mohamed/vaultix
+repo_url: https://github.com/Zayan-Mohamed/vaultix
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Zayan-Mohamed
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/in/zayan-mohamed
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quick Start: quickstart.md
+      - Basic Usage: usage.md
+  - User Guide:
+      - Commands: commands.md
+      - Examples: examples.md
+      - Best Practices: best-practices.md
+  - Technical:
+      - Architecture: architecture.md
+      - Security Model: security.md
+      - Cryptography: cryptography.md
+  - Reference:
+      - API Reference: api.md
+      - FAQ: faq.md
+      - Troubleshooting: troubleshooting.md
+  - Contributing:
+      - Development: development.md
+      - Contributing Guide: contributing.md
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+copyright: Copyright &copy; 2026 Zayan Mohamed
