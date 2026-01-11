@@ -29,48 +29,75 @@ func New(rootPath string) *Vault {
 }
 
 // Initialize creates a new vault with the given password and encrypts all files in the directory
-func (v *Vault) Initialize(password string) error {
+// Returns the recovery key that should be saved by the user
+func (v *Vault) Initialize(password string) ([]byte, error) {
 	// Get list of files to encrypt before creating vault structure
 	filesToEncrypt, err := storage.ListDirectoryFiles(v.rootPath)
 	if err != nil {
-		return fmt.Errorf("failed to list files: %w", err)
+		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
 
 	// Initialize vault structure
 	if err := storage.InitializeVault(v.rootPath); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Generate and store salt
+	// Generate master key (random 256-bit key)
+	masterKey, err := crypto.GenerateMasterKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate master key: %w", err)
+	}
+
+	// Generate recovery key (random 256-bit key)
+	recoveryKey, err := crypto.GenerateRecoveryKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate recovery key: %w", err)
+	}
+
+	// Generate salt for password-based key derivation
 	salt, err := crypto.GenerateSalt()
 	if err != nil {
-		return fmt.Errorf("failed to generate salt: %w", err)
+		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
 	if err := storage.WriteSalt(v.rootPath, salt); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Derive key
-	key, err := crypto.DeriveKey(password, salt)
+	// Encrypt master key with password-derived key
+	encryptedMasterKey, err := crypto.EncryptMasterKey(masterKey, []byte(password), salt)
 	if err != nil {
-		return fmt.Errorf("failed to derive key: %w", err)
+		return nil, fmt.Errorf("failed to encrypt master key with password: %w", err)
 	}
 
-	// Encrypt the initial empty metadata
+	if err := storage.WriteMasterKey(v.rootPath, encryptedMasterKey); err != nil {
+		return nil, err
+	}
+
+	// Encrypt master key with recovery key
+	encryptedMasterKeyForRecovery, err := crypto.EncryptMasterKeyWithRecoveryKey(masterKey, recoveryKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt master key with recovery key: %w", err)
+	}
+
+	if err := storage.WriteRecoveryKey(v.rootPath, encryptedMasterKeyForRecovery); err != nil {
+		return nil, err
+	}
+
+	// Encrypt the initial empty metadata with master key
 	meta := &storage.VaultMetadata{
 		Version: 1,
 		Files:   []storage.FileMetadata{},
 	}
-	if err := v.writeMetadata(key, meta); err != nil {
-		return fmt.Errorf("failed to write initial metadata: %w", err)
+	if err := v.writeMetadata(masterKey, meta); err != nil {
+		return nil, fmt.Errorf("failed to write initial metadata: %w", err)
 	}
 
 	// Encrypt all files in the directory
 	if len(filesToEncrypt) > 0 {
 		for _, filePath := range filesToEncrypt {
-			if err := v.addFileInternal(password, filePath, key); err != nil {
-				return fmt.Errorf("failed to encrypt %s: %w", filePath, err)
+			if err := v.addFileInternal(filePath, masterKey); err != nil {
+				return nil, fmt.Errorf("failed to encrypt %s: %w", filePath, err)
 			}
 		}
 
@@ -83,24 +110,152 @@ func (v *Vault) Initialize(password string) error {
 		}
 	}
 
-	return nil
+	return recoveryKey, nil
+}
+
+// unlockWithPassword decrypts the master key using the password
+func (v *Vault) unlockWithPassword(password string) ([]byte, error) {
+	// Read salt
+	salt, err := storage.ReadSalt(v.rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read encrypted master key
+	encryptedMasterKey, err := storage.ReadMasterKey(v.rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt master key
+	masterKey, err := crypto.DecryptMasterKey(encryptedMasterKey, password, salt)
+	if err != nil {
+		return nil, err
+	}
+
+	return masterKey, nil
+}
+
+// UnlockWithRecoveryKey decrypts the master key using the recovery key
+func (v *Vault) UnlockWithRecoveryKey(recoveryKey []byte) ([]byte, error) {
+	// Read encrypted master key (for recovery)
+	encryptedMasterKeyForRecovery, err := storage.ReadRecoveryKey(v.rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt master key
+	masterKey, err := crypto.DecryptMasterKeyWithRecoveryKey(encryptedMasterKeyForRecovery, recoveryKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return masterKey, nil
+}
+
+// ListFilesWithMasterKey lists files using the master key directly (for recovery)
+func (v *Vault) ListFilesWithMasterKey(masterKey []byte) ([]storage.FileMetadata, error) {
+	meta, err := v.readMetadata(masterKey)
+	if err != nil {
+		return nil, err
+	}
+	return meta.Files, nil
+}
+
+// ExtractFileWithMasterKey extracts a file using the master key directly (for recovery)
+func (v *Vault) ExtractFileWithMasterKey(masterKey []byte, fileName, destPath string) (string, error) {
+	// Read and decrypt metadata
+	meta, err := v.readMetadata(masterKey)
+	if err != nil {
+		return "", err
+	}
+
+	// Find the file with fuzzy matching
+	fileMeta := findFileByName(meta.Files, fileName)
+	if fileMeta == nil {
+		return "", ErrFileNotFound
+	}
+
+	// Read encrypted object
+	encryptedData, err := storage.ReadObject(v.rootPath, fileMeta.ID)
+	if err != nil {
+		return "", err
+	}
+
+	// Decrypt with master key
+	plaintext, err := crypto.Decrypt(encryptedData, masterKey)
+	if err != nil {
+		return "", err
+	}
+
+	// Determine output path
+	outputPath := destPath
+	if destPath == "" || destPath == "." {
+		outputPath = fileMeta.OriginalName
+	}
+
+	// Write decrypted file
+	if err := storage.WritePlaintextFile(outputPath, plaintext, fileMeta.ModTime); err != nil {
+		return "", err
+	}
+
+	return fileMeta.OriginalName, nil
+}
+
+// ExtractAllFilesWithMasterKey extracts all files using the master key directly (for recovery)
+func (v *Vault) ExtractAllFilesWithMasterKey(masterKey []byte, destDir string) (int, error) {
+	// Read and decrypt metadata
+	meta, err := v.readMetadata(masterKey)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(meta.Files) == 0 {
+		return 0, nil
+	}
+
+	// Extract each file
+	count := 0
+	for _, fileMeta := range meta.Files {
+		// Read encrypted object
+		encryptedData, err := storage.ReadObject(v.rootPath, fileMeta.ID)
+		if err != nil {
+			return count, fmt.Errorf("failed to read %s: %w", fileMeta.OriginalName, err)
+		}
+
+		// Decrypt with master key
+		plaintext, err := crypto.Decrypt(encryptedData, masterKey)
+		if err != nil {
+			return count, fmt.Errorf("failed to decrypt %s: %w", fileMeta.OriginalName, err)
+		}
+
+		// Determine output path
+		outputPath := fileMeta.OriginalName
+		if destDir != "" && destDir != "." {
+			outputPath = filepath.Join(destDir, fileMeta.OriginalName)
+		}
+
+		// Write decrypted file
+		if err := storage.WritePlaintextFile(outputPath, plaintext, fileMeta.ModTime); err != nil {
+			return count, fmt.Errorf("failed to write %s: %w", fileMeta.OriginalName, err)
+		}
+
+		count++
+	}
+
+	return count, nil
 }
 
 // AddFile encrypts and adds a file to the vault
 func (v *Vault) AddFile(password, filePath string) error {
-	// Get salt and derive key
-	salt, err := storage.ReadSalt(v.rootPath)
-	if err != nil {
-		return err
-	}
-
-	key, err := crypto.DeriveKey(password, salt)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return err
 	}
 
 	// Add the file using internal helper
-	if err := v.addFileInternal(password, filePath, key); err != nil {
+	if err := v.addFileInternal(filePath, masterKey); err != nil {
 		return err
 	}
 
@@ -114,7 +269,7 @@ func (v *Vault) AddFile(password, filePath string) error {
 }
 
 // addFileInternal is the internal implementation for adding files
-func (v *Vault) addFileInternal(password, filePath string, key []byte) error {
+func (v *Vault) addFileInternal(filePath string, masterKey []byte) error {
 	// Read the file to be added
 	data, info, err := storage.ReadPlaintextFile(filePath)
 	if err != nil {
@@ -122,7 +277,7 @@ func (v *Vault) addFileInternal(password, filePath string, key []byte) error {
 	}
 
 	// Read and decrypt existing metadata
-	meta, err := v.readMetadata(key)
+	meta, err := v.readMetadata(masterKey)
 	if err != nil {
 		return fmt.Errorf("failed to read metadata: %w", err)
 	}
@@ -138,8 +293,8 @@ func (v *Vault) addFileInternal(password, filePath string, key []byte) error {
 	// Generate unique object ID
 	objectID := storage.GenerateObjectID(fileName)
 
-	// Encrypt file data
-	encryptedData, err := crypto.Encrypt(data, key)
+	// Encrypt file data with master key
+	encryptedData, err := crypto.Encrypt(data, masterKey)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt file: %w", err)
 	}
@@ -160,7 +315,7 @@ func (v *Vault) addFileInternal(password, filePath string, key []byte) error {
 	meta.Files = append(meta.Files, fileMeta)
 
 	// Encrypt and write updated metadata
-	if err := v.writeMetadata(key, meta); err != nil {
+	if err := v.writeMetadata(masterKey, meta); err != nil {
 		// Try to clean up the object file
 		storage.DeleteObject(v.rootPath, objectID)
 		return fmt.Errorf("failed to update metadata: %w", err)
@@ -171,19 +326,14 @@ func (v *Vault) addFileInternal(password, filePath string, key []byte) error {
 
 // ListFiles returns the list of files in the vault
 func (v *Vault) ListFiles(password string) ([]storage.FileMetadata, error) {
-	// Get salt and derive key
-	salt, err := storage.ReadSalt(v.rootPath)
-	if err != nil {
-		return nil, err
-	}
-
-	key, err := crypto.DeriveKey(password, salt)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return nil, err
 	}
 
 	// Read and decrypt metadata
-	meta, err := v.readMetadata(key)
+	meta, err := v.readMetadata(masterKey)
 	if err != nil {
 		return nil, err
 	}
@@ -194,19 +344,14 @@ func (v *Vault) ListFiles(password string) ([]storage.FileMetadata, error) {
 // ExtractFile decrypts and extracts a file from the vault
 // Returns the actual filename that was matched (for fuzzy matching)
 func (v *Vault) ExtractFile(password, fileName, destPath string) (string, error) {
-	// Get salt and derive key
-	salt, err := storage.ReadSalt(v.rootPath)
-	if err != nil {
-		return "", err
-	}
-
-	key, err := crypto.DeriveKey(password, salt)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return "", err
 	}
 
 	// Read and decrypt metadata
-	meta, err := v.readMetadata(key)
+	meta, err := v.readMetadata(masterKey)
 	if err != nil {
 		return "", err
 	}
@@ -224,8 +369,8 @@ func (v *Vault) ExtractFile(password, fileName, destPath string) (string, error)
 		return "", err
 	}
 
-	// Decrypt
-	plaintext, err := crypto.Decrypt(encryptedData, key)
+	// Decrypt with master key
+	plaintext, err := crypto.Decrypt(encryptedData, masterKey)
 	if err != nil {
 		return "", err
 	}
@@ -246,19 +391,14 @@ func (v *Vault) ExtractFile(password, fileName, destPath string) (string, error)
 
 // ExtractAllFiles decrypts and extracts all files from the vault
 func (v *Vault) ExtractAllFiles(password, destDir string) (int, error) {
-	// Get salt and derive key
-	salt, err := storage.ReadSalt(v.rootPath)
-	if err != nil {
-		return 0, err
-	}
-
-	key, err := crypto.DeriveKey(password, salt)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return 0, err
 	}
 
 	// Read and decrypt metadata
-	meta, err := v.readMetadata(key)
+	meta, err := v.readMetadata(masterKey)
 	if err != nil {
 		return 0, err
 	}
@@ -276,8 +416,8 @@ func (v *Vault) ExtractAllFiles(password, destDir string) (int, error) {
 			return count, fmt.Errorf("failed to read %s: %w", fileMeta.OriginalName, err)
 		}
 
-		// Decrypt
-		plaintext, err := crypto.Decrypt(encryptedData, key)
+		// Decrypt with master key
+		plaintext, err := crypto.Decrypt(encryptedData, masterKey)
 		if err != nil {
 			return count, fmt.Errorf("failed to decrypt %s: %w", fileMeta.OriginalName, err)
 		}
@@ -333,19 +473,14 @@ func (v *Vault) DropAllFiles(password, destDir string) (int, error) {
 
 // ClearVault removes all files from the vault without extracting them
 func (v *Vault) ClearVault(password string) error {
-	// Get salt and derive key
-	salt, err := storage.ReadSalt(v.rootPath)
-	if err != nil {
-		return err
-	}
-
-	key, err := crypto.DeriveKey(password, salt)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return err
 	}
 
 	// Read and decrypt metadata
-	meta, err := v.readMetadata(key)
+	meta, err := v.readMetadata(masterKey)
 	if err != nil {
 		return err
 	}
@@ -359,7 +494,7 @@ func (v *Vault) ClearVault(password string) error {
 
 	// Clear metadata
 	meta.Files = []storage.FileMetadata{}
-	if err := v.writeMetadata(key, meta); err != nil {
+	if err := v.writeMetadata(masterKey, meta); err != nil {
 		return err
 	}
 
@@ -368,19 +503,14 @@ func (v *Vault) ClearVault(password string) error {
 
 // RemoveFile removes a file from the vault
 func (v *Vault) RemoveFile(password, fileName string) error {
-	// Get salt and derive key
-	salt, err := storage.ReadSalt(v.rootPath)
-	if err != nil {
-		return err
-	}
-
-	key, err := crypto.DeriveKey(password, salt)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return err
 	}
 
 	// Read and decrypt metadata
-	meta, err := v.readMetadata(key)
+	meta, err := v.readMetadata(masterKey)
 	if err != nil {
 		return err
 	}
@@ -409,7 +539,7 @@ func (v *Vault) RemoveFile(password, fileName string) error {
 
 	// Update metadata
 	meta.Files = newFiles
-	if err := v.writeMetadata(key, meta); err != nil {
+	if err := v.writeMetadata(masterKey, meta); err != nil {
 		return fmt.Errorf("failed to update metadata: %w", err)
 	}
 

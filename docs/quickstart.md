@@ -34,10 +34,33 @@ Initializing vault and encrypting existing files...
 ✓ Vault initialized at: /home/user/my_secrets
 ✓ All files have been encrypted
 ✓ Original plaintext files have been securely deleted
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  IMPORTANT: RECOVERY KEY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your recovery key (save this in a secure location):
+
+  5025f74e-c5d7a54a-7b99c87b-78cca1a0-61854d30-fb0d2783-a9df7067-b67ad345
+
+This recovery key can unlock your vault if you forget your password.
+Store it safely - if you lose both your password AND recovery key,
+your vault will be permanently unrecoverable.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-!!! warning "Important"
-Choose a strong password and remember it! There's no password recovery.
+!!! warning "Critical - Save Your Recovery Key!"
+    **Copy and save this recovery key immediately!** It's displayed only once during initialization.
+    - Print it and store in a safe
+    - Save to a password manager
+    - Store in a different location from your vault
+    - **Never** lose both password AND recovery key
+
+!!! info "Dual Unlock Methods"
+    You can unlock your vault with either:
+    - Your password (what you just set)
+    - Your recovery key (the hex string above)
 
 ### Step 4: Verify Files are Encrypted
 

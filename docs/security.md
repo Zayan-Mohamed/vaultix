@@ -2,25 +2,76 @@
 
 Understanding Vaultix's security guarantees and limitations.
 
+## Architecture Overview
+
+Vaultix uses a **master key encryption model**:
+
+1. **Master Key (256-bit random)**: Encrypts all vault data
+2. **Password Protection**: Master key encrypted with Argon2id-derived key
+3. **Recovery Key (256-bit random)**: Alternative way to decrypt master key
+4. **No Plaintext Storage**: Master key never stored unencrypted on disk
+
+This architecture provides:
+- Dual unlock methods (password OR recovery key)
+- Fast password changes (only re-encrypt master key, not all data)
+- Recovery option if password forgotten
+- Defense in depth (multiple encryption layers)
+
 ## Threat Model
 
 ### What Vaultix Protects Against ✓
 
 - **Unauthorized file access**: Files are encrypted at rest with AES-256-GCM
-- **Casual snooping**: Encrypted data is unreadable without the password
+- **Casual snooping**: Encrypted data is unreadable without password or recovery key
 - **Filename leakage**: Original filenames are encrypted in metadata
 - **Data tampering**: GCM provides authentication, detecting modifications
+- **Password loss**: Recovery key provides backup access method
 
 ### What Vaultix Does NOT Protect Against ✗
 
 - **Weak passwords**: A guessable password defeats all encryption
+- **Lost recovery key**: If you lose BOTH password AND recovery key, data is permanently lost
+- **Recovery key exposure**: Anyone with recovery key can unlock vault
 - **Keyloggers/malware**: If your system is compromised, passwords can be captured
 - **Memory attacks**: Decrypted data exists in memory during operations
-- **Physical access**: Someone with your password and physical access can decrypt
-- **Legal compulsion**: Courts can order you to provide passwords
+- **Physical access**: Someone with your password or recovery key and physical access can decrypt
+- **Legal compulsion**: Courts can order you to provide passwords/recovery keys
 - **Side-channel attacks**: Advanced attacks on the cryptographic implementation
 
 ## Cryptographic Primitives
+
+### Master Key
+
+**Algorithm**: Cryptographically Secure Random Number Generator (CSPRNG)
+
+**Size**: 256 bits (32 bytes)
+
+**Purpose**: 
+- Encrypts all vault data (files + metadata)
+- Never stored in plaintext
+- Encrypted twice: once with password-derived key, once with recovery key
+
+**Generation**:
+```go
+masterKey := make([]byte, 32)
+crypto/rand.Read(masterKey)
+```
+
+### Recovery Key
+
+**Algorithm**: Cryptographically Secure Random Number Generator (CSPRNG)
+
+**Size**: 256 bits (32 bytes)
+
+**Purpose**:
+- Alternative method to unlock vault
+- Can decrypt the master key
+- Displayed once during initialization
+
+**Format**: Hexadecimal string with dashes for readability
+```
+5025f74e-c5d7a54a-7b99c87b-78cca1a0-61854d30-fb0d2783-a9df7067-b67ad345
+```
 
 ### Key Derivation: Argon2id
 
