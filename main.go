@@ -33,6 +33,8 @@ func main() {
 		err = cli.Remove(args)
 	case "clear":
 		err = cli.Clear(args)
+	case "recover":
+		err = cli.Recover(args)
 	case "help", "-h", "--help":
 		cli.PrintUsage()
 		os.Exit(0)

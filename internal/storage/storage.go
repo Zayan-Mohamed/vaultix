@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	vaultDirName   = ".vaultix"
-	metaFileName   = "meta"
-	saltFileName   = "salt"
-	configFileName = "config"
-	objectsDirName = "objects"
+	vaultDirName        = ".vaultix"
+	metaFileName        = "meta"
+	saltFileName        = "salt"
+	configFileName      = "config"
+	objectsDirName      = "objects"
+	masterKeyFileName   = "master.key"
+	recoveryKeyFileName = "recovery.key"
 )
 
 var (
@@ -28,12 +30,14 @@ var (
 
 // VaultPaths holds all relevant paths for a vault
 type VaultPaths struct {
-	Root     string
-	VaultDir string
-	Meta     string
-	Salt     string
-	Config   string
-	Objects  string
+	Root        string
+	VaultDir    string
+	Meta        string
+	Salt        string
+	Config      string
+	Objects     string
+	MasterKey   string
+	RecoveryKey string
 }
 
 // FileMetadata stores information about an encrypted file
@@ -55,12 +59,14 @@ type VaultMetadata struct {
 func GetVaultPaths(rootPath string) VaultPaths {
 	vaultDir := filepath.Join(rootPath, vaultDirName)
 	return VaultPaths{
-		Root:     rootPath,
-		VaultDir: vaultDir,
-		Meta:     filepath.Join(vaultDir, metaFileName),
-		Salt:     filepath.Join(vaultDir, saltFileName),
-		Config:   filepath.Join(vaultDir, configFileName),
-		Objects:  filepath.Join(vaultDir, objectsDirName),
+		Root:        rootPath,
+		VaultDir:    vaultDir,
+		Meta:        filepath.Join(vaultDir, metaFileName),
+		Salt:        filepath.Join(vaultDir, saltFileName),
+		Config:      filepath.Join(vaultDir, configFileName),
+		Objects:     filepath.Join(vaultDir, objectsDirName),
+		MasterKey:   filepath.Join(vaultDir, masterKeyFileName),
+		RecoveryKey: filepath.Join(vaultDir, recoveryKeyFileName),
 	}
 }
 
@@ -140,6 +146,50 @@ func ReadSalt(rootPath string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read salt: %w", err)
 	}
 	return salt, nil
+}
+
+// WriteMasterKey stores the encrypted master key
+func WriteMasterKey(rootPath string, encryptedMasterKey []byte) error {
+	paths := GetVaultPaths(rootPath)
+	if err := os.WriteFile(paths.MasterKey, encryptedMasterKey, 0600); err != nil {
+		return fmt.Errorf("failed to write master key: %w", err)
+	}
+	return nil
+}
+
+// ReadMasterKey reads the encrypted master key
+func ReadMasterKey(rootPath string) ([]byte, error) {
+	paths := GetVaultPaths(rootPath)
+	encryptedMasterKey, err := os.ReadFile(paths.MasterKey)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrVaultNotFound
+		}
+		return nil, fmt.Errorf("failed to read master key: %w", err)
+	}
+	return encryptedMasterKey, nil
+}
+
+// WriteRecoveryKey stores the encrypted master key (encrypted with recovery key)
+func WriteRecoveryKey(rootPath string, encryptedMasterKeyForRecovery []byte) error {
+	paths := GetVaultPaths(rootPath)
+	if err := os.WriteFile(paths.RecoveryKey, encryptedMasterKeyForRecovery, 0600); err != nil {
+		return fmt.Errorf("failed to write recovery key file: %w", err)
+	}
+	return nil
+}
+
+// ReadRecoveryKey reads the encrypted master key (for recovery key unlock)
+func ReadRecoveryKey(rootPath string) ([]byte, error) {
+	paths := GetVaultPaths(rootPath)
+	encryptedMasterKeyForRecovery, err := os.ReadFile(paths.RecoveryKey)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrVaultNotFound
+		}
+		return nil, fmt.Errorf("failed to read recovery key file: %w", err)
+	}
+	return encryptedMasterKeyForRecovery, nil
 }
 
 // ReadMetadata reads and returns the encrypted metadata

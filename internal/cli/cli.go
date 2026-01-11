@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/Zayan-Mohamed/vaultix/internal/crypto"
 	"github.com/Zayan-Mohamed/vaultix/internal/storage"
 	"github.com/Zayan-Mohamed/vaultix/internal/vault"
 	"golang.org/x/term"
@@ -68,13 +69,28 @@ func Init(args []string) error {
 	// Initialize vault
 	v := vault.New(absPath)
 	fmt.Println("Initializing vault and encrypting existing files...")
-	if err := v.Initialize(password); err != nil {
+	recoveryKey, err := v.Initialize(password)
+	if err != nil {
 		return fmt.Errorf("failed to initialize vault: %w", err)
 	}
 
 	fmt.Printf("✓ Vault initialized at: %s\n", absPath)
 	fmt.Println("✓ All files have been encrypted")
 	fmt.Println("✓ Original plaintext files have been securely deleted")
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("             IMPORTANT: RECOVERY KEY")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+	fmt.Println("Your recovery key (save this in a secure location):")
+	fmt.Println()
+	fmt.Printf("  %s\n", crypto.FormatRecoveryKeyForDisplay(recoveryKey))
+	fmt.Println()
+	fmt.Println("This recovery key can unlock your vault if you forget your password.")
+	fmt.Println("Store it safely - if you lose both your password AND recovery key,")
+	fmt.Println("your vault will be permanently unrecoverable.")
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	return nil
 }
 
@@ -386,6 +402,115 @@ func Remove(args []string) error {
 	return nil
 }
 
+// Recover extracts files using the recovery key instead of password
+func Recover(args []string) error {
+	vaultPath := "."
+	fileName := ""
+	outputPath := ""
+
+	// Parse arguments: vaultix recover [vault] [file] [output]
+	if len(args) >= 1 && (args[0] == "." || filepath.IsAbs(args[0]) || filepath.Dir(args[0]) != ".") {
+		vaultPath = args[0]
+		if len(args) >= 2 {
+			fileName = args[1]
+		}
+		if len(args) >= 3 {
+			outputPath = args[2]
+		}
+	} else if len(args) >= 1 {
+		fileName = args[0]
+		if len(args) >= 2 {
+			outputPath = args[1]
+		}
+	}
+
+	// Convert to absolute path
+	absVaultPath, err := filepath.Abs(vaultPath)
+	if err != nil {
+		return fmt.Errorf("invalid vault path: %w", err)
+	}
+
+	// Check if vault exists
+	if !storage.VaultExists(absVaultPath) {
+		return fmt.Errorf("vault not found at: %s", absVaultPath)
+	}
+
+	// Read recovery key
+	fmt.Print("Enter recovery key (hex format with or without dashes): ")
+	var recoveryKeyStr string
+	if _, err := fmt.Scanln(&recoveryKeyStr); err != nil {
+		return fmt.Errorf("failed to read recovery key: %w", err)
+	}
+
+	// Remove dashes from the recovery key
+	recoveryKeyStr = filepath.ToSlash(recoveryKeyStr)
+	recoveryKeyStr = filepath.Clean(recoveryKeyStr)
+	// Simple approach: remove all non-hex characters
+	cleanKey := ""
+	for _, c := range recoveryKeyStr {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			cleanKey += string(c)
+		}
+	}
+
+	recoveryKey, err := crypto.DecodeRecoveryKeyHex(cleanKey)
+	if err != nil {
+		return fmt.Errorf("invalid recovery key: %w", err)
+	}
+
+	// Unlock vault with recovery key
+	v := vault.New(absVaultPath)
+	masterKey, err := v.UnlockWithRecoveryKey(recoveryKey)
+	if err != nil {
+		return fmt.Errorf("failed to unlock vault with recovery key: %w", err)
+	}
+
+	// If no filename specified, extract all
+	if fileName == "" {
+		return recoverAllFiles(v, masterKey, outputPath)
+	}
+
+	// Extract specific file
+	return recoverFile(v, masterKey, fileName, outputPath)
+}
+
+// recoverFile extracts a single file using master key
+func recoverFile(v *vault.Vault, masterKey []byte, fileName, destPath string) error {
+	actualFileName, err := v.ExtractFileWithMasterKey(masterKey, fileName, destPath)
+	if err != nil {
+		return fmt.Errorf("failed to extract file: %w", err)
+	}
+
+	outputLocation := destPath
+	if outputLocation == "" || outputLocation == "." {
+		outputLocation = actualFileName
+	}
+
+	fmt.Printf("✓ Recovered: %s -> %s\n", actualFileName, outputLocation)
+	return nil
+}
+
+// recoverAllFiles extracts all files using master key
+func recoverAllFiles(v *vault.Vault, masterKey []byte, destDir string) error {
+	count, err := v.ExtractAllFilesWithMasterKey(masterKey, destDir)
+	if err != nil {
+		return fmt.Errorf("failed to extract files: %w", err)
+	}
+
+	if count == 0 {
+		fmt.Println("Vault is empty")
+		return nil
+	}
+
+	location := "current directory"
+	if destDir != "" && destDir != "." {
+		location = destDir
+	}
+
+	fmt.Printf("✓ Recovered %d file(s) to %s\n", count, location)
+	return nil
+}
+
 // PrintUsage prints the usage information
 func PrintUsage() {
 	fmt.Println("vaultix - Secure encrypted folder management")
@@ -398,6 +523,7 @@ func PrintUsage() {
 	fmt.Println("  vaultix drop [file] [vault]      Extract file(s) and remove from vault")
 	fmt.Println("  vaultix remove <file> [vault]    Remove a file from vault (no extraction)")
 	fmt.Println("  vaultix clear [vault]            Remove ALL files from vault (no extraction)")
+	fmt.Println("  vaultix recover [vault] [file]   Unlock vault using recovery key")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  cd my_secrets && vaultix init    # Encrypt all files in current directory")
@@ -409,4 +535,6 @@ func PrintUsage() {
 	fmt.Println("  vaultix drop                     # Extract all and clear vault")
 	fmt.Println("  vaultix remove old.txt           # Remove file (no extraction)")
 	fmt.Println("  vaultix clear                    # Remove all (no extraction, asks confirm)")
+	fmt.Println("  vaultix recover                  # Extract all using recovery key")
+	fmt.Println("  vaultix recover . secret.txt     # Extract specific file using recovery key")
 }

@@ -4,7 +4,22 @@ Deep dive into the cryptographic primitives and implementation in vaultix.
 
 ## Overview
 
-Vaultix uses **standard, well-audited cryptographic algorithms** from Go's crypto library. No custom cryptography is implemented.
+Vaultix uses a **master key encryption model** with **standard, well-audited cryptographic algorithms** from Go's crypto library. No custom cryptography is implemented.
+
+### Master Key Architecture
+
+Vaultix employs a layered encryption approach:
+
+1. **Master Key (256-bit)**: Random key that encrypts all vault data
+2. **Password-Encrypted Master Key**: Master key encrypted with Argon2id-derived key from user password
+3. **Recovery-Key-Encrypted Master Key**: Master key encrypted with random recovery key (backup access)
+4. **Data Encryption**: All files and metadata encrypted with the master key
+
+This design provides:
+- ✅ Dual unlock methods (password OR recovery key)
+- ✅ No plaintext master key on disk
+- ✅ Recovery option if password forgotten
+- ✅ Fast re-keying possible (only re-encrypt master key, not all data)
 
 ## Algorithm Selection
 
@@ -87,7 +102,42 @@ const (
 
 ## Detailed Cryptographic Operations
 
-### Key Derivation Process
+### Master Key Generation
+
+```go
+// Generate random 256-bit master key (performed once during vault init)
+masterKey := make([]byte, 32) // 32 bytes = 256 bits
+if _, err := rand.Read(masterKey); err != nil {
+    return err
+}
+// Master key is NEVER stored in plaintext on disk
+```
+
+**Master Key Properties:**
+- 256 bits (32 bytes) of cryptographically secure random data
+- Generated once per vault during initialization
+- Stored only in encrypted form (twice: password-encrypted and recovery-key-encrypted)
+- All vault data (files + metadata) encrypted with this key
+
+### Recovery Key Generation
+
+```go
+// Generate random 256-bit recovery key (performed once during vault init)
+recoveryKey := make([]byte, 32) // 32 bytes = 256 bits
+if _, err := rand.Read(recoveryKey); err != nil {
+    return err
+}
+// Displayed to user ONCE as hex string with dashes
+// Format: 5025f74e-c5d7a54a-7b99c87b-78cca1a0-...
+```
+
+**Recovery Key Properties:**
+- 256 bits (32 bytes) of cryptographically secure random data
+- Displayed once to user during initialization (save it!)
+- Can decrypt the master key (alternative to password)
+- Formatted as 8 groups of 8 hex characters for readability
+
+### Key Derivation Process (Password to Key)
 
 ```go
 // 1. Generate random 32-byte salt (only once during init)
@@ -97,16 +147,16 @@ if _, err := rand.Read(salt); err != nil {
 }
 
 // 2. Derive key from password + salt using Argon2id
-key := argon2.IDKey(
+derivedKey := argon2.IDKey(
     []byte(password),  // User's password
     salt,              // Random salt
-    3,                 // Time cost (iterations)
+    1,                 // Time cost (iterations)
     64*1024,           // Memory cost (64 MB)
     4,                 // Parallelism (threads)
     32,                // Key length (256 bits)
 )
 
-// 3. Key is now ready for AES-256
+// 3. Use derived key to encrypt/decrypt the master key
 ```
 
 **Why salt?**
@@ -122,11 +172,67 @@ key := argon2.IDKey(
 - Unique per vault
 - Stored in `.vaultix/salt`
 
-### Encryption Process
+### Master Key Encryption (with Password)
 
 ```go
-// 1. Create AES cipher with derived key
-block, err := aes.NewCipher(key) // key must be 32 bytes
+// 1. Derive key from user's password
+derivedKey := argon2.IDKey(password, salt, 1, 64*1024, 4, 32)
+
+// 2. Encrypt master key with derived key
+encryptedMasterKey := AES256GCM_Encrypt(masterKey, derivedKey)
+
+// 3. Store encrypted master key
+// File: .vaultix/master.key
+// Contains: [nonce || encrypted_master_key || auth_tag]
+```
+
+### Master Key Encryption (with Recovery Key)
+
+```go
+// 1. Use recovery key directly (no derivation needed)
+// 2. Encrypt master key with recovery key
+encryptedMasterKeyForRecovery := AES256GCM_Encrypt(masterKey, recoveryKey)
+
+// 3. Store encrypted master key
+// File: .vaultix/recovery.key
+// Contains: [nonce || encrypted_master_key || auth_tag]
+```
+
+### Unlocking the Vault (with Password)
+
+```go
+// 1. Read salt and encrypted master key
+salt := ReadFile(".vaultix/salt")
+encryptedMasterKey := ReadFile(".vaultix/master.key")
+
+// 2. Derive key from password
+derivedKey := argon2.IDKey(password, salt, 1, 64*1024, 4, 32)
+
+// 3. Decrypt master key
+masterKey := AES256GCM_Decrypt(encryptedMasterKey, derivedKey)
+// If wrong password: decryption fails with authentication error
+
+// 4. Use master key to decrypt vault data
+```
+
+### Unlocking the Vault (with Recovery Key)
+
+```go
+// 1. Read encrypted master key (recovery version)
+encryptedMasterKeyForRecovery := ReadFile(".vaultix/recovery.key")
+
+// 2. Decrypt master key using recovery key directly
+masterKey := AES256GCM_Decrypt(encryptedMasterKeyForRecovery, recoveryKey)
+// If wrong recovery key: decryption fails with authentication error
+
+// 3. Use master key to decrypt vault data
+```
+
+### Encryption Process (File Data)
+
+```go
+// 1. Create AES cipher with MASTER KEY (not password!)
+block, err := aes.NewCipher(masterKey) // masterKey is 32 bytes
 
 // 2. Create GCM mode wrapper
 gcm, err := cipher.NewGCM(block)
@@ -160,8 +266,8 @@ ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
 // 1. Read ciphertext from disk
 ciphertext, err := os.ReadFile(path)
 
-// 2. Create AES cipher with derived key
-block, err := aes.NewCipher(key)
+// 2. Create AES cipher with MASTER KEY
+block, err := aes.NewCipher(masterKey)
 
 // 3. Create GCM mode wrapper
 gcm, err := cipher.NewGCM(block)
@@ -193,8 +299,8 @@ if err != nil {
 // 1. Marshal metadata to JSON
 jsonData, err := json.Marshal(metadata)
 
-// 2. Encrypt JSON using same key
-encryptedMeta := gcm.Seal(nonce, nonce, jsonData, nil)
+// 2. Encrypt JSON using MASTER KEY
+encryptedMeta := gcm.Seal(nonce, nonce, jsonData, masterKey)
 
 // 3. Write to .vaultix/meta
 ```

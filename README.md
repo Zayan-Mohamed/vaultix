@@ -40,6 +40,9 @@ vaultix is a secure, lightweight CLI tool that encrypts files in place using mil
 ## ✨ Features
 
 ✅ **Automatic Encryption** - Initialize a vault and all files are encrypted instantly  
+✅ **Master Key Encryption** - Random 256-bit master key protects all vault data  
+✅ **Recovery Key Support** - Unlock vault if you forget your password  
+✅ **Dual Unlock Methods** - Use password OR recovery key  
 ✅ **Fuzzy File Matching** - No need to type exact filenames  
 ✅ **Default to Current Directory** - Less typing, more doing  
 ✅ **Extract or Drop** - Extract files while keeping in vault, or drop them out  
@@ -51,11 +54,13 @@ vaultix is a secure, lightweight CLI tool that encrypts files in place using mil
 
 ### Cryptography
 
-vaultix uses industry-standard cryptographic primitives:
+vaultix uses a **master key encryption model** with industry-standard cryptographic primitives:
 
-- **Key Derivation**: Argon2id with 64MB memory, 1 iteration, 4 threads
-- **Encryption**: AES-256-GCM (authenticated encryption)
-- **Randomness**: Go's `crypto/rand` package
+- **Master Key**: Random 256-bit key generated per vault (encrypted, never stored in plaintext)
+- **Password Protection**: Master key encrypted with Argon2id-derived key (64MB memory, 1 iteration, 4 threads)
+- **Recovery Key**: Random 256-bit key that can decrypt the master key (backup unlock method)
+- **Data Encryption**: AES-256-GCM authenticated encryption for all vault data
+- **Randomness**: Go's `crypto/rand` package for all cryptographic random generation
 
 ### Threat Model
 
@@ -76,8 +81,9 @@ vaultix does **not** protect against:
 
 ### Important Limitations
 
-- **Password-only security**: Your vault is only as secure as your password
-- **No password recovery**: Forget your password = lose your data permanently
+- **Dual authentication required**: Keep both password AND recovery key safe
+- **No password reset**: If you lose BOTH password and recovery key, data is permanently lost
+- **Recovery key is critical**: Store it safely (printed, secure password manager, etc.)
 - **No automatic backups**: You are responsible for backing up your vaults
 - **Single-user design**: No multi-user or sharing capabilities
 - **Files only**: Cannot encrypt directories (add files individually)
@@ -149,6 +155,11 @@ vaultix init
 # ✓ Vault initialized
 # ✓ All files encrypted
 # ✓ Original files securely deleted
+#
+# ⚠️  IMPORTANT: RECOVERY KEY
+# Your recovery key: 5025f74e-c5d7a54a-7b99c87b-78cca1a0-...
+# Save this recovery key in a secure location!
+# It can unlock your vault if you forget your password.
 
 # List encrypted files
 vaultix list
@@ -183,6 +194,7 @@ vaultix extract
 | `drop <file>`    | Extract and remove from vault          | `vaultix drop secret`    |
 | `remove <file>`  | Remove file from vault (no extract)    | `vaultix remove old.txt` |
 | `clear [path]`   | Remove all files from vault            | `vaultix clear`          |
+| `recover [file]` | Unlock vault using recovery key        | `vaultix recover`        |
 
 > 💡 **Pro Tip**: Most commands default to current directory, so you rarely need to specify paths!
 
@@ -211,35 +223,41 @@ When you initialize a vault at a path (e.g., `./my_secrets`), vaultix creates a 
 my_secrets/
 └── .vaultix/
     ├── meta          # Encrypted metadata (filenames, sizes, timestamps)
-    ├── salt          # Random salt for key derivation
+    ├── salt          # Random salt for password-based key derivation
+    ├── master.key    # Master key encrypted with password-derived key
+    ├── recovery.key  # Master key encrypted with recovery key
     └── objects/
-        ├── 3f9a2c1d.enc
-        └── 91bd77aa.enc
+        ├── 3f9a2c1d.enc  # Encrypted file data
+        └── 91bd77aa.enc  # Encrypted file data
 ```
 
 ### Security Details
 
-1. **No passwords stored**: Your password exists only in memory during operations
-2. **Encrypted metadata**: Even filenames are encrypted
-3. **Obfuscated object names**: Encrypted files have random IDs
-4. **Salt per vault**: Each vault has a unique random salt
-5. **Authentication**: AES-GCM provides both encryption and integrity verification
+1. **Master key encryption**: A random 256-bit master key encrypts all vault data
+2. **Dual unlock methods**: Master key can be decrypted with password OR recovery key
+3. **No plaintext keys**: Master key never stored in plaintext on disk
+4. **No passwords stored**: Your password exists only in memory during operations
+5. **Encrypted metadata**: Even filenames are encrypted with the master key
+6. **Obfuscated object names**: Encrypted files have random IDs
+7. **Salt per vault**: Each vault has a unique random salt
+8. **Authentication**: AES-GCM provides both encryption and integrity verification
 
-### Password Verification
+### Authentication and Unlock
 
-Password correctness is verified by successful decryption of the metadata. There are no stored password hashes. This means:
+Password/recovery key correctness is verified by successful decryption of the master key. There are no stored password hashes. This means:
 
-- Incorrect password = decryption failure
-- No way to test passwords without attempting decryption
-- No way to recover from a forgotten password
+- Incorrect password/recovery key = decryption failure
+- No way to test credentials without attempting decryption
+- Recovery key provides backup access if password is forgotten
+- If you lose BOTH password AND recovery key, data is permanently lost
 
 ---
 
 ## 💡 Best Practices
 
-### Password Selection
+### Password and Recovery Key Management
 
-Use a strong, unique password:
+**Password Selection** - Use a strong, unique password:
 
 - ✅ At least 16 characters
 - ✅ Mix of letters, numbers, and symbols
@@ -247,6 +265,14 @@ Use a strong, unique password:
 - ✅ Not easily guessable
 
 Consider using a password manager to generate and store your vault password.
+
+**Recovery Key Storage** - Your recovery key is displayed ONCE during vault initialization:
+
+- ✅ Print it and store in a safe location
+- ✅ Save to a password manager as a secure note
+- ✅ Store in a separate secure location from your vault
+- ⚠️ Never store recovery key inside the vault itself
+- ⚠️ If you lose both password AND recovery key, data is permanently lost
 
 ### Backup Strategy
 
