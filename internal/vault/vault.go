@@ -99,10 +99,8 @@ func (v *Vault) Initialize(password string) ([]byte, error) {
 			if err := v.addFileInternal(filePath, masterKey); err != nil {
 				return nil, fmt.Errorf("failed to encrypt %s: %w", filePath, err)
 			}
-		}
 
-		// Delete original files after successful encryption
-		for _, filePath := range filesToEncrypt {
+			// Delete original file immediately after successful encryption to save disk space
 			if err := storage.SecureDelete(filePath); err != nil {
 				// Log warning but don't fail - file is already encrypted
 				fmt.Fprintf(os.Stderr, "warning: failed to delete %s: %v\n", filePath, err)
@@ -457,15 +455,71 @@ func (v *Vault) DropFile(password, fileName, destPath string) (string, error) {
 
 // DropAllFiles extracts all files and then removes them from the vault
 func (v *Vault) DropAllFiles(password, destDir string) (int, error) {
-	// First extract all files
-	count, err := v.ExtractAllFiles(password, destDir)
+	// Unlock vault with password
+	masterKey, err := v.unlockWithPassword(password)
 	if err != nil {
 		return 0, err
 	}
 
-	// Then clear the vault
-	if err := v.ClearVault(password); err != nil {
-		return count, fmt.Errorf("extracted %d files but failed to clear vault: %w", count, err)
+	// Read and decrypt metadata
+	meta, err := v.readMetadata(masterKey)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(meta.Files) == 0 {
+		return 0, nil
+	}
+
+	// Extract and remove each file
+	count := 0
+	newFiles := make([]storage.FileMetadata, 0, len(meta.Files))
+
+	for _, fileMeta := range meta.Files {
+		// Read encrypted object
+		encryptedData, err := storage.ReadObject(v.rootPath, fileMeta.ID)
+		if err != nil {
+			newFiles = append(newFiles, meta.Files[count:]...)
+			meta.Files = newFiles
+			_ = v.writeMetadata(masterKey, meta)
+			return count, fmt.Errorf("failed to read %s: %w", fileMeta.OriginalName, err)
+		}
+
+		// Decrypt with master key
+		plaintext, err := crypto.Decrypt(encryptedData, masterKey)
+		if err != nil {
+			newFiles = append(newFiles, meta.Files[count:]...)
+			meta.Files = newFiles
+			_ = v.writeMetadata(masterKey, meta)
+			return count, fmt.Errorf("failed to decrypt %s: %w", fileMeta.OriginalName, err)
+		}
+
+		// Determine output path
+		outputPath := fileMeta.OriginalName
+		if destDir != "" && destDir != "." {
+			outputPath = filepath.Join(destDir, fileMeta.OriginalName)
+		}
+
+		// Write decrypted file
+		if err := storage.WritePlaintextFile(outputPath, plaintext, fileMeta.ModTime); err != nil {
+			newFiles = append(newFiles, meta.Files[count:]...)
+			meta.Files = newFiles
+			_ = v.writeMetadata(masterKey, meta)
+			return count, fmt.Errorf("failed to write %s: %w", fileMeta.OriginalName, err)
+		}
+
+		// Delete the encrypted object immediately to save disk space
+		if err := storage.DeleteObject(v.rootPath, fileMeta.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to delete object %s: %v\n", fileMeta.ID, err)
+		}
+
+		count++
+	}
+
+	// Clear metadata
+	meta.Files = []storage.FileMetadata{}
+	if err := v.writeMetadata(masterKey, meta); err != nil {
+		return count, fmt.Errorf("extracted %d files but failed to update metadata: %w", count, err)
 	}
 
 	return count, nil
