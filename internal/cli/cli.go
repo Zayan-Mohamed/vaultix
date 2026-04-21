@@ -68,8 +68,19 @@ func Init(args []string) error {
 
 	// Initialize vault
 	v := vault.New(absPath)
-	fmt.Println("Initializing vault and encrypting existing files...")
+
+	spinner := NewProgressSpinner("Encrypting")
+	spinner.Start()
+
+	v.SetProgressCallback(func(current, total int, message string) {
+		spinner.Update(current, total, message)
+	})
+
 	recoveryKey, err := v.Initialize(password)
+
+	spinner.Stop()
+	<-spinner.done
+
 	if err != nil {
 		return fmt.Errorf("failed to initialize vault: %w", err)
 	}
@@ -135,12 +146,23 @@ func Add(args []string) error {
 
 	// Add file
 	v := vault.New(absVaultPath)
-	if err := v.AddFile(password, absFilePath); err != nil {
+
+	spinner := NewProgressSpinner("Adding")
+	spinner.Start()
+
+	fileName := filepath.Base(absFilePath)
+	spinner.Update(1, 1, fileName)
+
+	err = v.AddFile(password, absFilePath)
+
+	spinner.Stop()
+	<-spinner.done
+
+	if err != nil {
 		return fmt.Errorf("failed to add file: %w", err)
 	}
 
-	fileName := filepath.Base(absFilePath)
-	fmt.Printf("File added: %s\n", fileName)
+	fmt.Printf("✓ File added: %s\n", fileName)
 	return nil
 }
 
@@ -239,7 +261,18 @@ func Extract(args []string) error {
 
 	// If no filename specified, extract all files
 	if fileName == "" {
+		spinner := NewProgressSpinner("Extracting")
+		spinner.Start()
+
+		v.SetProgressCallback(func(current, total int, message string) {
+			spinner.Update(current, total, message)
+		})
+
 		count, err := v.ExtractAllFiles(password, outputPath)
+
+		spinner.Stop()
+		<-spinner.done
+
 		if err != nil {
 			return fmt.Errorf("failed to extract files: %w", err)
 		}
@@ -248,7 +281,15 @@ func Extract(args []string) error {
 	}
 
 	// Extract single file with fuzzy matching
+	spinner := NewProgressSpinner("Extracting")
+	spinner.Start()
+	spinner.Update(1, 1, fileName)
+
 	actualFileName, err := v.ExtractFile(password, fileName, outputPath)
+
+	spinner.Stop()
+	<-spinner.done
+
 	if err != nil {
 		return fmt.Errorf("failed to extract file: %w", err)
 	}
@@ -303,7 +344,18 @@ func Drop(args []string) error {
 
 	// If no filename specified, drop all files
 	if fileName == "" {
+		spinner := NewProgressSpinner("Dropping")
+		spinner.Start()
+
+		v.SetProgressCallback(func(current, total int, message string) {
+			spinner.Update(current, total, message)
+		})
+
 		count, err := v.DropAllFiles(password, outputPath)
+
+		spinner.Stop()
+		<-spinner.done
+
 		if err != nil {
 			return fmt.Errorf("failed to drop files: %w", err)
 		}
@@ -312,7 +364,15 @@ func Drop(args []string) error {
 	}
 
 	// Drop single file
+	spinner := NewProgressSpinner("Dropping")
+	spinner.Start()
+	spinner.Update(1, 1, fileName)
+
 	actualFileName, err := v.DropFile(password, fileName, outputPath)
+
+	spinner.Stop()
+	<-spinner.done
+
 	if err != nil {
 		return fmt.Errorf("failed to drop file: %w", err)
 	}
@@ -492,7 +552,18 @@ func recoverFile(v *vault.Vault, masterKey []byte, fileName, destPath string) er
 
 // recoverAllFiles extracts all files using master key
 func recoverAllFiles(v *vault.Vault, masterKey []byte, destDir string) error {
+	spinner := NewProgressSpinner("Recovering")
+	spinner.Start()
+
+	v.SetProgressCallback(func(current, total int, message string) {
+		spinner.Update(current, total, message)
+	})
+
 	count, err := v.ExtractAllFilesWithMasterKey(masterKey, destDir)
+
+	spinner.Stop()
+	<-spinner.done
+
 	if err != nil {
 		return fmt.Errorf("failed to extract files: %w", err)
 	}

@@ -20,12 +20,18 @@ var (
 
 // Vault represents a secure vault instance
 type Vault struct {
-	rootPath string
+	rootPath   string
+	onProgress func(current, total int, message string)
 }
 
 // New creates a new vault instance at the given path
 func New(rootPath string) *Vault {
 	return &Vault{rootPath: rootPath}
+}
+
+// SetProgressCallback sets a callback function for reporting progress
+func (v *Vault) SetProgressCallback(callback func(current, total int, message string)) {
+	v.onProgress = callback
 }
 
 // Initialize creates a new vault with the given password and encrypts all files in the directory
@@ -94,8 +100,13 @@ func (v *Vault) Initialize(password string) ([]byte, error) {
 	}
 
 	// Encrypt all files in the directory
-	if len(filesToEncrypt) > 0 {
-		for _, filePath := range filesToEncrypt {
+	totalFiles := len(filesToEncrypt)
+	if totalFiles > 0 {
+		for i, filePath := range filesToEncrypt {
+			if v.onProgress != nil {
+				v.onProgress(i+1, totalFiles, filepath.Base(filePath))
+			}
+
 			if err := v.addFileInternal(filePath, masterKey); err != nil {
 				return nil, fmt.Errorf("failed to encrypt %s: %w", filePath, err)
 			}
@@ -214,7 +225,12 @@ func (v *Vault) ExtractAllFilesWithMasterKey(masterKey []byte, destDir string) (
 
 	// Extract each file
 	count := 0
-	for _, fileMeta := range meta.Files {
+	totalFiles := len(meta.Files)
+	for i, fileMeta := range meta.Files {
+		if v.onProgress != nil {
+			v.onProgress(i+1, totalFiles, fileMeta.OriginalName)
+		}
+
 		// Read encrypted object
 		encryptedData, err := storage.ReadObject(v.rootPath, fileMeta.ID)
 		if err != nil {
@@ -407,7 +423,12 @@ func (v *Vault) ExtractAllFiles(password, destDir string) (int, error) {
 
 	// Extract each file
 	count := 0
-	for _, fileMeta := range meta.Files {
+	totalFiles := len(meta.Files)
+	for i, fileMeta := range meta.Files {
+		if v.onProgress != nil {
+			v.onProgress(i+1, totalFiles, fileMeta.OriginalName)
+		}
+
 		// Read encrypted object
 		encryptedData, err := storage.ReadObject(v.rootPath, fileMeta.ID)
 		if err != nil {
@@ -473,9 +494,14 @@ func (v *Vault) DropAllFiles(password, destDir string) (int, error) {
 
 	// Extract and remove each file
 	count := 0
+	totalFiles := len(meta.Files)
 	newFiles := make([]storage.FileMetadata, 0, len(meta.Files))
 
-	for _, fileMeta := range meta.Files {
+	for i, fileMeta := range meta.Files {
+		if v.onProgress != nil {
+			v.onProgress(i+1, totalFiles, fileMeta.OriginalName)
+		}
+
 		// Read encrypted object
 		encryptedData, err := storage.ReadObject(v.rootPath, fileMeta.ID)
 		if err != nil {
